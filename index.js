@@ -13,7 +13,7 @@ const globalToken = process.env.MAX_BOT_TOKEN || '';
 
 // ⚠️ ВСТАВЬТЕ СЮДА URL ВАШЕГО ВЕБ-ПРИЛОЖЕНИЯ GOOGLE APPS SCRIPT
 // (Получается при деплое: Развернуть -> Новое развертывание -> Веб-приложение)
-const GOOGLE_SCRIPT_URL = process.env.GOOGLE_SCRIPT_URL || 'ВСТАВЬТЕ_СЮДА_URL_ИЗ_GOOGLE_SCRIPT';
+const GOOGLE_SCRIPT_URL = process.env.GOOGLE_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycbw970SSFREWRAtC-h0bXGiyJ0pNXCvD6Ctr7ZpjOCEH7qmv461bAweH0wL75xfB-Mg7/exec';
 
 app.post('/set-webhook', async (req, res) => {
   const token = req.body.token || globalToken;
