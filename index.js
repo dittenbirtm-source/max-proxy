@@ -5,13 +5,17 @@ const https = require('https');
 const app = express();
 app.use(express.json());
 
+// Отключение проверки SSL для API MAX
 const httpsAgent = new https.Agent({  
-  rejectUnauthorized: false // Игнорируем ошибки SSL от MAX API
+  rejectUnauthorized: false
 });
 
-let globalToken = 'f9LHodD0cOJCVdaARDFpMhx5T4B5LZiSIFSXATaFliPn-ndgexawgawYR6SiATW8KWQ6g7HEa-hLcHBDhVtS';
+// Токен считывается из переменных окружения Render
+const globalToken = process.env.MAX_BOT_TOKEN || '';
 
-// 1. Привязка Webhook через Прокси
+// ==========================================
+// 1. УСТАНОВКА ВЕБХУКА
+// ==========================================
 app.post('/set-webhook', async (req, res) => {
   const token = req.body.token || globalToken;
   const webhookUrl = req.body.webhook_url || 'https://max-proxy-yfj7.onrender.com/max-webhook';
@@ -21,10 +25,7 @@ app.post('/set-webhook', async (req, res) => {
       method: 'post',
       url: 'https://platform-api2.max.ru/subscriptions',
       data: { url: webhookUrl },
-      headers: {
-        'Authorization': token,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Authorization': token, 'Content-Type': 'application/json' },
       httpsAgent: httpsAgent
     });
 
@@ -36,59 +37,75 @@ app.post('/set-webhook', async (req, res) => {
   }
 });
 
-// 2. WEBHOOK: Получение входящих сообщений
+// ==========================================
+// 2. ВХОДЯЩИЕ ВЕБХУКИ ОТ MAX API
+// ==========================================
 app.post('/max-webhook', async (req, res) => {
   res.sendStatus(200);
-  
   try {
-    const data = req.body;
-    console.log('📩 Входящее событие от MAX:', JSON.stringify(data));
-
-    const chatId = data.chat_id || data.message?.chat?.id || data.recipient?.chatId;
-
-    if (chatId) {
-      const responseText = `🤖 ID этого чата в MAX API:\n${chatId}`;
-
-      await axios({
-        method: 'post',
-        url: 'https://platform-api2.max.ru/messages',
-        data: { chat_id: chatId, text: responseText },
-        headers: { 'Authorization': globalToken, 'Content-Type': 'application/json' },
-        httpsAgent: httpsAgent
-      });
-      
-      console.log(`✅ ID (${chatId}) отправлен в чат!`);
-    }
+    console.log('📩 Входящие данные от MAX:', JSON.stringify(req.body));
   } catch (err) {
-    console.error('❌ Ошибка обработки Webhook:', err.response?.data || err.message);
+    console.error('❌ Ошибка при получении Webhook:', err.message);
   }
 });
 
-// 3. PROXY: Отправка из Google Apps Script
+// ==========================================
+// 3. УНИВЕРСАЛЬНАЯ ОТПРАВКА СООБЩЕНИЙ
+// ==========================================
 app.post('/send-max', async (req, res) => {
-  let token = req.body.token ? String(req.body.token).trim() : globalToken;
+  const token = req.body.token ? String(req.body.token).trim() : globalToken;
   const inputPayload = req.body.payload || {};
 
-  if (token) globalToken = token;
-
-  const chatId = inputPayload.chat_id || inputPayload.chatId || inputPayload.recipient?.chatId;
+  const rawId = String(inputPayload.chat_id || inputPayload.chatId || '').trim();
   const text = inputPayload.text || '';
 
-  try {
-    const response = await axios({
-      method: 'post',
-      url: 'https://platform-api2.max.ru/messages',
-      data: { chat_id: chatId, text: text },
-      headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-      httpsAgent: httpsAgent
-    });
+  // Очистка ID от лишних символов для формирования альтернативных вариантов
+  const cleanId = rawId.replace('-', '').replace('@chat.agent', '').replace('@channel', '');
 
-    console.log(`✅ Сообщение отправлено в чат ${chatId}`);
-    return res.status(response.status).json(response.data);
-  } catch (err) {
-    console.error('❌ Ошибка отправки в MAX:', err.response?.data || err.message);
-    return res.status(err.response?.status || 500).json(err.response?.data || { error: err.message });
+  // Перебор всех форматов адресации MAX / VK Teams API
+  const attempts = [
+    { chat_id: rawId, text: text },                         // Как передано (-71997730303397)
+    { chat_id: `${cleanId}@chat.agent`, text: text },       // Групповой чат с суффиксом @chat.agent
+    { channel_id: rawId, text: text },                      // Канал (channel_id)
+    { channel_id: cleanId, text: text },                    // Канал без минуса
+    { user_id: rawId, text: text },                         // Личный диалог (user_id)
+    { chat_id: Number(cleanId), text: text }               // Численный ID
+  ];
+
+  let lastError = null;
+
+  for (let i = 0; i < attempts.length; i++) {
+    const payload = attempts[i];
+    try {
+      console.log(`[Попытка ${i + 1}/${attempts.length}] Передача payload:`, JSON.stringify(payload));
+      
+      const response = await axios({
+        method: 'post',
+        url: 'https://platform-api2.max.ru/messages',
+        data: payload,
+        headers: {
+          'Authorization': token,
+          'Content-Type': 'application/json'
+        },
+        httpsAgent: httpsAgent
+      });
+
+      console.log(`✅ УСПЕХ! Сообщение доставлено (вариант №${i + 1})`);
+      return res.status(response.status).json(response.data);
+    } catch (err) {
+      const errorMsg = err.response?.data?.message || err.message;
+      console.log(`⚠️ Попытка №${i + 1} не прошла: ${errorMsg}`);
+      lastError = err;
+      
+      // Небольшая задержка перед следующей попыткой
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
   }
+
+  return res.status(lastError?.response?.status || 400).json({
+    error: lastError?.message,
+    details: lastError?.response?.data || null
+  });
 });
 
 const PORT = process.env.PORT || 3000;
