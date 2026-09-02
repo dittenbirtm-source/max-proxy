@@ -11,7 +11,6 @@ const httpsAgent = new https.Agent({
 
 const globalToken = process.env.MAX_BOT_TOKEN || '';
 
-// 1. УСТАНОВКА ВЕБХУКА
 app.post('/set-webhook', async (req, res) => {
   const token = req.body.token || globalToken;
   const webhookUrl = req.body.webhook_url || 'https://max-proxy-yfj7.onrender.com/max-webhook';
@@ -33,7 +32,6 @@ app.post('/set-webhook', async (req, res) => {
   }
 });
 
-// 2. ВХОДЯЩИЕ ВЕБХУКИ
 app.post('/max-webhook', async (req, res) => {
   res.sendStatus(200);
   try {
@@ -43,7 +41,6 @@ app.post('/max-webhook', async (req, res) => {
   }
 });
 
-// 3. ОТПРАВКА СООБЩЕНИЙ
 app.post('/send-max', async (req, res) => {
   const token = req.body.token ? String(req.body.token).trim() : globalToken;
   const inputPayload = req.body.payload || {};
@@ -51,44 +48,49 @@ app.post('/send-max', async (req, res) => {
   const rawId = inputPayload.chat_id || inputPayload.chatId || '';
   const text = inputPayload.text || '';
 
-  // Преобразуем ID в число, если это возможно
-  const numericId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
+  const strId = String(rawId);
+  const numId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
 
-  // Формируем варианты структуры recipient под требования MAX API
+  // Формируем все возможные варианты структуры тела и query-параметров
   const attempts = [
-    // Вариант 1: Групповой чат (структура из вашего вебхука)
+    // 1. Строковый chat_id в recipient.chat_id
     {
-      recipient: { chat_type: 'chat', chat_id: numericId },
-      body: { text: text }
+      url: 'https://platform-api2.max.ru/messages',
+      data: { recipient: { chat_type: 'chat', chat_id: strId }, body: { text: text } }
     },
-    // Вариант 2: Личный диалог
+    // 2. Через URL параметр chat_id
     {
-      recipient: { chat_type: 'dialog', chat_id: numericId },
-      body: { text: text }
+      url: `https://platform-api2.max.ru/messages?chat_id=${encodeURIComponent(strId)}`,
+      data: { body: { text: text }, text: text }
     },
-    // Вариант 3: Канал
+    // 3. Плоская структура с chat_id строкой
     {
-      recipient: { chat_type: 'channel', chat_id: numericId },
-      body: { text: text }
+      url: 'https://platform-api2.max.ru/messages',
+      data: { chat_id: strId, text: text, body: { text: text } }
     },
-    // Вариант 4: Прямой пользователь
+    // 4. Групповой чат через user_id/peer_id (для случаев, когда чат обрабатывается как диалоговый объект)
     {
-      recipient: { chat_type: 'dialog', user_id: numericId },
-      body: { text: text }
+      url: 'https://platform-api2.max.ru/messages',
+      data: { recipient: { chat_id: strId }, body: { text: text } }
+    },
+    // 5. Числовой chat_id
+    {
+      url: 'https://platform-api2.max.ru/messages',
+      data: { recipient: { chat_type: 'chat', chat_id: numId }, body: { text: text } }
     }
   ];
 
   let lastError = null;
 
   for (let i = 0; i < attempts.length; i++) {
-    const payload = attempts[i];
+    const item = attempts[i];
     try {
-      console.log(`[Попытка ${i + 1}/${attempts.length}] Передача payload:`, JSON.stringify(payload));
+      console.log(`[Попытка ${i + 1}/${attempts.length}] URL: ${item.url} | Payload:`, JSON.stringify(item.data));
       
       const response = await axios({
         method: 'post',
-        url: 'https://platform-api2.max.ru/messages',
-        data: payload,
+        url: item.url,
+        data: item.data,
         headers: {
           'Authorization': token,
           'Content-Type': 'application/json'
@@ -99,8 +101,8 @@ app.post('/send-max', async (req, res) => {
       console.log(`✅ УСПЕХ! Сообщение доставлено (вариант №${i + 1})`);
       return res.status(response.status).json(response.data);
     } catch (err) {
-      const errorMsg = err.response?.data?.message || err.message;
-      console.log(`⚠️ Попытка №${i + 1} не прошла: ${JSON.stringify(err.response?.data || errorMsg)}`);
+      const errorMsg = err.response?.data || err.message;
+      console.log(`⚠️ Попытка №${i + 1} не прошла: ${JSON.stringify(errorMsg)}`);
       lastError = err;
       
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -113,5 +115,5 @@ app.post('/send-max', async (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Proxy running on port ${PORT}`));
