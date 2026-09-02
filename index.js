@@ -17,63 +17,34 @@ app.post('/send-max', async (req, res) => {
     return res.status(400).json({ error: 'Missing token or payload' });
   }
 
-  // Очищаем токен
+  // Очищаем токен от префикса Bearer, если он был передан
   if (token.toLowerCase().startsWith('bearer ')) {
     token = token.slice(7).trim();
   }
 
-  // Массив различных вариантов формирования заголовков и путей API MAX
-  const attempts = [
-    {
-      name: 'Standard Bearer',
+  try {
+    // Используем подтвержденный заголовок X-Max-Bot-Token
+    const response = await axios({
+      method: 'post',
       url: 'https://platform-api2.max.ru/messages',
-      headers: { 'Authorization': `Bearer ${token}` }
-    },
-    {
-      name: 'X-Max-Bot-Token Header',
-      url: 'https://platform-api2.max.ru/messages',
-      headers: { 'X-Max-Bot-Token': token }
-    },
-    {
-      name: 'Bot-Token Header',
-      url: 'https://platform-api2.max.ru/messages',
-      headers: { 'Bot-Token': token }
-    },
-    {
-      name: 'Bots endpoint Bearer',
-      url: 'https://platform-api2.max.ru/bots/messages',
-      headers: { 'Authorization': `Bearer ${token}` }
-    }
-  ];
+      data: payload,
+      headers: {
+        'X-Max-Bot-Token': token,
+        'Content-Type': 'application/json'
+      },
+      httpsAgent: httpsAgent
+    });
 
-  let lastError = null;
-
-  for (const config of attempts) {
-    try {
-      console.log(`[Attempting]: ${config.name}`);
-      const response = await axios({
-        method: 'post',
-        url: config.url,
-        data: payload,
-        headers: {
-          ...config.headers,
-          'Content-Type': 'application/json'
-        },
-        httpsAgent: httpsAgent
-      });
-
-      console.log(`✅ Success via ${config.name}`);
-      return res.status(response.status).json(response.data);
-    } catch (err) {
-      console.log(`❌ Failed ${config.name}:`, err.response?.data || err.message);
-      lastError = err;
-    }
+    console.log('✅ Сообщение успешно отправлено в MAX!');
+    return res.status(response.status).json(response.data);
+  } catch (error) {
+    console.error('❌ Ошибка ответа от MAX API:', error.response?.data || error.message);
+    
+    return res.status(error.response?.status || 500).json({
+      error: error.message,
+      details: error.response?.data || null
+    });
   }
-
-  return res.status(lastError?.response?.status || 500).json({
-    error: lastError?.message,
-    details: lastError?.response?.data || null
-  });
 });
 
 const PORT = process.env.PORT || 3000;
