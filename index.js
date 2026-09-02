@@ -17,32 +17,48 @@ app.post('/send-max', async (req, res) => {
     return res.status(400).json({ error: 'Missing token or payload' });
   }
 
-  // Очищаем токен от префикса Bearer, если он был передан
   if (token.toLowerCase().startsWith('bearer ')) {
     token = token.slice(7).trim();
   }
 
+  // 1. Способ через Query-параметр (основной для Bot API MAX)
   try {
-    // Используем подтвержденный заголовок X-Max-Bot-Token
     const response = await axios({
       method: 'post',
-      url: 'https://platform-api2.max.ru/messages',
+      url: `https://platform-api2.max.ru/messages?token=${encodeURIComponent(token)}`,
       data: payload,
       headers: {
-        'X-Max-Bot-Token': token,
         'Content-Type': 'application/json'
       },
       httpsAgent: httpsAgent
     });
 
-    console.log('✅ Сообщение успешно отправлено в MAX!');
+    console.log('✅ Сообщение отправлено (Query token)');
     return res.status(response.status).json(response.data);
-  } catch (error) {
-    console.error('❌ Ошибка ответа от MAX API:', error.response?.data || error.message);
-    
-    return res.status(error.response?.status || 500).json({
-      error: error.message,
-      details: error.response?.data || null
+  } catch (errQuery) {
+    console.log('⚠️ Ошибка Query token:', errQuery.response?.data || errQuery.message);
+  }
+
+  // 2. Способ через Authorization без Bearer
+  try {
+    const response = await axios({
+      method: 'post',
+      url: 'https://platform-api2.max.ru/messages',
+      data: payload,
+      headers: {
+        'Authorization': token,
+        'Content-Type': 'application/json'
+      },
+      httpsAgent: httpsAgent
+    });
+
+    console.log('✅ Сообщение отправлено (Raw Authorization header)');
+    return res.status(response.status).json(response.data);
+  } catch (errAuth) {
+    console.error('❌ Ошибка Authorization header:', errAuth.response?.data || errAuth.message);
+    return res.status(errAuth.response?.status || 500).json({
+      error: errAuth.message,
+      details: errAuth.response?.data || null
     });
   }
 });
