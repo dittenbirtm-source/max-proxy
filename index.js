@@ -43,37 +43,37 @@ app.post('/max-webhook', async (req, res) => {
 
 app.post('/send-max', async (req, res) => {
   const token = req.body.token ? String(req.body.token).trim() : globalToken;
-  const inputPayload = req.body.payload || {};
+  
+  // Универсальное извлечение параметров (как из плоской структуры, так и из payload)
+  const payload = req.body.payload || {};
+  const rawId = req.body.chat_id || payload.chat_id || payload.chatId || '';
+  const text = req.body.text || payload.text || payload.body?.text || payload.message || '';
 
-  const rawId = inputPayload.chat_id || inputPayload.chatId || '';
-  const text = inputPayload.text || '';
+  // Защита от отправки пустых запросов
+  if (!rawId || !text) {
+    console.error(`❌ Валидация не пройдена: chat_id="${rawId}", text_length=${text ? text.length : 0}`);
+    return res.status(400).json({ 
+      error: 'Empty chat_id or text', 
+      received: { chat_id: rawId, text: text } 
+    });
+  }
 
   const strId = String(rawId);
   const numId = !isNaN(Number(rawId)) ? Number(rawId) : rawId;
 
-  // Формируем все возможные варианты структуры тела и query-параметров
+  // Набор проверенных вариантов запроса
   const attempts = [
-    // 1. Строковый chat_id в recipient.chat_id
-    {
-      url: 'https://platform-api2.max.ru/messages',
-      data: { recipient: { chat_type: 'chat', chat_id: strId }, body: { text: text } }
-    },
-    // 2. Через URL параметр chat_id
+    // 1. Прямой работающий метод через URL parameter
     {
       url: `https://platform-api2.max.ru/messages?chat_id=${encodeURIComponent(strId)}`,
       data: { body: { text: text }, text: text }
     },
-    // 3. Плоская структура с chat_id строкой
+    // 2. Стандартный метод через recipient объект (строковый ID)
     {
       url: 'https://platform-api2.max.ru/messages',
-      data: { chat_id: strId, text: text, body: { text: text } }
+      data: { recipient: { chat_type: 'chat', chat_id: strId }, body: { text: text } }
     },
-    // 4. Групповой чат через user_id/peer_id (для случаев, когда чат обрабатывается как диалоговый объект)
-    {
-      url: 'https://platform-api2.max.ru/messages',
-      data: { recipient: { chat_id: strId }, body: { text: text } }
-    },
-    // 5. Числовой chat_id
+    // 3. Через recipient объект (числовой ID)
     {
       url: 'https://platform-api2.max.ru/messages',
       data: { recipient: { chat_type: 'chat', chat_id: numId }, body: { text: text } }
@@ -85,7 +85,7 @@ app.post('/send-max', async (req, res) => {
   for (let i = 0; i < attempts.length; i++) {
     const item = attempts[i];
     try {
-      console.log(`[Попытка ${i + 1}/${attempts.length}] URL: ${item.url} | Payload:`, JSON.stringify(item.data));
+      console.log(`[Попытка ${i + 1}/${attempts.length}] URL: ${item.url}`);
       
       const response = await axios({
         method: 'post',
