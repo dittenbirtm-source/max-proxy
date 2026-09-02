@@ -5,7 +5,6 @@ const https = require('https');
 const app = express();
 app.use(express.json());
 
-// Отключение строгой проверки SSL для корректного взаимодействия с сертификатами Минцифры
 const httpsAgent = new https.Agent({  
   rejectUnauthorized: false
 });
@@ -15,37 +14,66 @@ app.post('/send-max', async (req, res) => {
   const payload = req.body.payload;
 
   if (!token || !payload) {
-    return res.status(400).json({ error: 'Отсутствует token или payload' });
+    return res.status(400).json({ error: 'Missing token or payload' });
   }
 
-  // Очищаем токен от префикса Bearer, если он случайно продублирован
+  // Очищаем токен
   if (token.toLowerCase().startsWith('bearer ')) {
     token = token.slice(7).trim();
   }
 
-  try {
-    // В соответствии с официальной документацией MAX API
-    const response = await axios({
-      method: 'post',
+  // Массив различных вариантов формирования заголовков и путей API MAX
+  const attempts = [
+    {
+      name: 'Standard Bearer',
       url: 'https://platform-api2.max.ru/messages',
-      data: payload,
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      httpsAgent: httpsAgent
-    });
+      headers: { 'Authorization': `Bearer ${token}` }
+    },
+    {
+      name: 'X-Max-Bot-Token Header',
+      url: 'https://platform-api2.max.ru/messages',
+      headers: { 'X-Max-Bot-Token': token }
+    },
+    {
+      name: 'Bot-Token Header',
+      url: 'https://platform-api2.max.ru/messages',
+      headers: { 'Bot-Token': token }
+    },
+    {
+      name: 'Bots endpoint Bearer',
+      url: 'https://platform-api2.max.ru/bots/messages',
+      headers: { 'Authorization': `Bearer ${token}` }
+    }
+  ];
 
-    console.log('✅ Сообщение успешно отправлено в MAX');
-    return res.status(response.status).json(response.data);
-  } catch (error) {
-    console.error('❌ Ошибка ответа от MAX API:', error.response?.data || error.message);
-    
-    return res.status(error.response?.status || 500).json({
-      error: error.message,
-      details: error.response?.data || null
-    });
+  let lastError = null;
+
+  for (const config of attempts) {
+    try {
+      console.log(`[Attempting]: ${config.name}`);
+      const response = await axios({
+        method: 'post',
+        url: config.url,
+        data: payload,
+        headers: {
+          ...config.headers,
+          'Content-Type': 'application/json'
+        },
+        httpsAgent: httpsAgent
+      });
+
+      console.log(`✅ Success via ${config.name}`);
+      return res.status(response.status).json(response.data);
+    } catch (err) {
+      console.log(`❌ Failed ${config.name}:`, err.response?.data || err.message);
+      lastError = err;
+    }
   }
+
+  return res.status(lastError?.response?.status || 500).json({
+    error: lastError?.message,
+    details: lastError?.response?.data || null
+  });
 });
 
 const PORT = process.env.PORT || 3000;
